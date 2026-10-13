@@ -5,11 +5,13 @@ const User = require("./models/User");
 const connectDB = require("./config/db");
 const dotenv = require("dotenv");
 const Auth = require("./Routes/Authentication/Auth");
+const cookieParser = require("cookie-parser");
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+app.use(cookieParser());
 app.use("/Auth",Auth)
 
 // HOME ROUTE
