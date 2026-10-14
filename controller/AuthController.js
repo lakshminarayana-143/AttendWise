@@ -248,11 +248,25 @@ const Logout = (req, res) => {
     });
   }
 };
+ // PROFILE CONTROLLER
+ 
+ const Profile = async (req,res)=>{
+  try{
+    const user = await User.findById(req.user._id).select("-password")
+    if(!user){
+      res.status(404).json({message : "User Not Found"});
+    }
+    res.status(200).json({user});
+  }
+  catch(error){
+    console.error("Profile Error", error.message);
+    res.status(500).json({message : "Server Error"});
 
-
+  }
+ }
 
 module.exports = {
   SignUp,
-  Login,Logout
+  Login,Logout,Profile
 };
 
