@@ -6,10 +6,20 @@ const connectDB = require("./config/db");
 const dotenv = require("dotenv");
 const Auth = require("./Routes/Authentication/Auth");
 const cookieParser = require("cookie-parser");
+const cors = require("cors");
+
 
 dotenv.config();
 
 const app = express();
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 app.use(express.json());
 app.use(cookieParser());
 app.use("/Auth",Auth)
