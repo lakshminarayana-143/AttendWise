@@ -1,51 +1,44 @@
-
 const express = require("express");
-const bcrypt = require("bcryptjs");
-const User = require("./models/User");
-const connectDB = require("./config/db");
-const dotenv = require("dotenv");
-const Auth = require("./Routes/Authentication/Auth");
-const cookieParser = require("cookie-parser");
 const cors = require("cors");
-
+const cookieParser = require("cookie-parser");
+const dotenv = require("dotenv");
 
 dotenv.config();
 
 const app = express();
+
+// Middleware must be configured after creating the Express app.
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-app.use(express.json());
-app.use(cookieParser());
-app.use("/Auth",Auth)
 
-// HOME ROUTE
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+// Route imports
+const Auth = require("./Routes/Authentication/Auth");
+
+// Health check
 app.get("/", (req, res) => {
   res.status(200).json({
-    message: "AttendWise Attendance Management API is running",
+    success: true,
+    message: "AttendWise API is running.",
   });
 });
 
+// Authentication routes
+app.use("/Auth", Auth);
 
-// Start server only after database connection succeeds
-const startServer = async () => {
-  try {
-    await connectDB();
+// Start the server.
+// Keep your existing MongoDB connection setup if it is already in this file.
+const PORT = process.env.PORT || 3000;
 
-    const PORT = process.env.PORT || 3000;
-
-    app.listen(PORT, () => {
-      console.log(`AttendWise server running on port ${PORT}`);
-    });
-  } catch (error) {
-    console.error("Unable to start AttendWise:", error.message);
-    process.exit(1);
-  }
-};
-
-startServer();
+app.listen(PORT, () => {
+  console.log(`AttendWise server running on port ${PORT}`);
+});

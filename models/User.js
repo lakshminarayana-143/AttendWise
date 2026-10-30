@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
@@ -20,20 +19,20 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: true,
-      minlength: 6,
+      select: false,
     },
 
     role: {
       type: String,
-      enum: ["faculty", "student"],
+      enum: ["student", "faculty", "admin"],
+      default: "student",
       required: true,
     },
 
     studentId: {
       type: String,
-      unique: true,
-      sparse: true,
       trim: true,
+      sparse: true,
     },
 
     department: {
@@ -44,6 +43,17 @@ const userSchema = new mongoose.Schema(
     year: {
       type: Number,
       min: 1,
+      max: 4,
+    },
+
+    facultyId: {
+      type: String,
+      trim: true,
+    },
+
+    isApproved: {
+      type: Boolean,
+      default: false,
     },
   },
   {

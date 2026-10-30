@@ -1,82 +1,92 @@
-
 const bcrypt = require("bcryptjs");
-const User = require("../models/User");
 const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 
-// Generate JWT
-const generateToken = (user) => {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET is not configured");
-  }
-
+const createToken = (user) => {
   return jwt.sign(
     {
-      id: user._id.toString(),
+      id: user._id,
       role: user.role,
     },
     process.env.JWT_SECRET,
-    { expiresIn: "1d" }
+    {
+      expiresIn: "1d",
+    }
   );
 };
 
-// SIGNUP CONTROLLER
+const setAuthCookie = (res, token) => {
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 24 * 60 * 60 * 1000,
+  });
+};
+
+const formatUser = (user) => ({
+  id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  studentId: user.studentId,
+  department: user.department,
+  year: user.year,
+  facultyId: user.facultyId,
+  isApproved: user.isApproved,
+});
+
+// STUDENT REGISTRATION
 const SignUp = async (req, res) => {
   try {
     const {
       name,
       email,
       password,
-      role,
       studentId,
       department,
       year,
     } = req.body;
 
-    // Validate required fields
-    if (!name?.trim() || !email?.trim() || !password || !role) {
+    if (
+      !name?.trim() ||
+      !email?.trim() ||
+      !password ||
+      !studentId?.trim() ||
+      !department?.trim() ||
+      year === undefined ||
+      year === null ||
+      year === ""
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Name, email, password and role are required",
-      });
-    }
-
-    // Validate password
-    if (password.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must contain at least 8 characters",
-      });
-    }
-
-    // Validate role
-    if (!["faculty", "student"].includes(role)) {
-      return res.status(400).json({
-        success: false,
-        message: "Role must be faculty or student",
-      });
-    }
-
-    // Public signup must not grant faculty privileges.
-    // Create faculty accounts through a protected admin process.
-    if (role === "faculty") {
-      return res.status(403).json({
-        success: false,
-        message: "Faculty registration is restricted",
-      });
-    }
-
-    // Validate student fields
-    if (!studentId?.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Student ID is required",
+        message: "Please provide all required student details.",
       });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedStudentId = studentId.trim();
 
-    // Check existing email
+    if (password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must contain at least 8 characters.",
+      });
+    }
+
+    const academicYear = Number(year);
+
+    if (
+      !Number.isInteger(academicYear) ||
+      academicYear < 1 ||
+      academicYear > 4
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Academic year must be between 1 and 4.",
+      });
+    }
+
     const existingEmail = await User.findOne({
       email: normalizedEmail,
     });
@@ -84,65 +94,169 @@ const SignUp = async (req, res) => {
     if (existingEmail) {
       return res.status(409).json({
         success: false,
-        message: "Email is already registered",
+        message: "An account with this email already exists.",
       });
     }
 
-    // Check existing student ID
     const existingStudent = await User.findOne({
       studentId: normalizedStudentId,
+      role: "student",
     });
 
     if (existingStudent) {
       return res.status(409).json({
         success: false,
-        message: "Student ID is already registered",
+        message: "This student ID is already registered.",
       });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Create student
     const user = await User.create({
       name: name.trim(),
       email: normalizedEmail,
       password: hashedPassword,
-      role: "student",
       studentId: normalizedStudentId,
-      department: department?.trim(),
-      year,
+      department: department.trim(),
+      year: academicYear,
+
+      // Never accept the role directly from public signup.
+      role: "student",
+      isApproved: true,
     });
 
     return res.status(201).json({
       success: true,
-      message: "Registration successful",
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        studentId: user.studentId,
-      },
+      message: "Student account created successfully.",
+      user: formatUser(user),
     });
   } catch (error) {
-    console.error("Signup error:", error);
-
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "Email or student ID already exists",
+        message: "An account with these details already exists.",
       });
     }
 
+    console.error("Student signup error:", error);
+
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Unable to register student.",
     });
   }
 };
 
-// LOGIN CONTROLLER
+// FACULTY REGISTRATION
+const FacultySignUp = async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      password,
+      facultyId,
+      department,
+      invitationCode,
+    } = req.body;
+
+    if (
+      !name?.trim() ||
+      !email?.trim() ||
+      !password ||
+      !facultyId?.trim() ||
+      !department?.trim() ||
+      !invitationCode
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide all required faculty details.",
+      });
+    }
+
+    if (!process.env.FACULTY_SIGNUP_CODE) {
+      return res.status(500).json({
+        success: false,
+        message: "Faculty registration is not configured.",
+      });
+    }
+
+    if (invitationCode !== process.env.FACULTY_SIGNUP_CODE) {
+      return res.status(403).json({
+        success: false,
+        message: "Invalid faculty invitation code.",
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must contain at least 8 characters.",
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedFacultyId = facultyId.trim();
+
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "An account with this email already exists.",
+      });
+    }
+
+    const existingFaculty = await User.findOne({
+      facultyId: normalizedFacultyId,
+    });
+
+    if (existingFaculty) {
+      return res.status(409).json({
+        success: false,
+        message: "This faculty ID is already registered.",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await User.create({
+      name: name.trim(),
+      email: normalizedEmail,
+      password: hashedPassword,
+      facultyId: normalizedFacultyId,
+      department: department.trim(),
+      role: "faculty",
+
+      // Registration does not automatically grant faculty access.
+      isApproved: false,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Faculty registration submitted. An administrator must approve your account before you can access faculty features.",
+      user: formatUser(user),
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "An account with these details already exists.",
+      });
+    }
+
+    console.error("Faculty signup error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to register faculty.",
+    });
+  }
+};
+
+// LOGIN
 const Login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -150,123 +264,88 @@ const Login = async (req, res) => {
     if (!email?.trim() || !password) {
       return res.status(400).json({
         success: false,
-        message: "Email and password are required",
+        message: "Email and password are required.",
       });
     }
 
-    if (!process.env.JWT_SECRET) {
-      console.error("JWT_SECRET is not configured");
-
-      return res.status(500).json({
-        success: false,
-        message: "Authentication service is not configured",
-      });
-    }
-
-    // Normalize email
-    const normalizedEmail = email.trim().toLowerCase();
-
-    // Find user
     const user = await User.findOne({
-      email: normalizedEmail,
-    });
+      email: email.trim().toLowerCase(),
+    }).select("+password");
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: "Invalid email or password",
+        message: "Invalid email or password.",
       });
     }
 
-    // Compare password
-    const isPasswordCorrect = await bcrypt.compare(
+    const isPasswordValid = await bcrypt.compare(
       password,
       user.password
     );
 
-    if (!isPasswordCorrect) {
+    if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        message: "Invalid email or password",
+        message: "Invalid email or password.",
       });
     }
 
-    // Generate JWT
-    const token = generateToken(user);
+    if (
+      user.role === "faculty" &&
+      !user.isApproved
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Your faculty account is awaiting administrator approval.",
+      });
+    }
 
-    // Set HTTP-only cookie
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite:
-        process.env.NODE_ENV === "production" ? "none" : "lax",
-      maxAge: 24 * 60 * 60 * 1000,
-      path: "/",
-    });
+    const token = createToken(user);
+
+    setAuthCookie(res, token);
 
     return res.status(200).json({
       success: true,
-      message: "Login successful",
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+      message: "Login successful.",
+      user: formatUser(user),
     });
   } catch (error) {
     console.error("Login error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Unable to log in.",
     });
   }
 };
 
-// LOGOUT CONTROLLER
+// LOGOUT
 const Logout = (req, res) => {
-  try {
-    res.clearCookie("token", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite:
-        process.env.NODE_ENV === "production" ? "none" : "lax",
-      path: "/",
-    });
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
 
-    return res.status(200).json({
-      success: true,
-      message: "Logout successful",
-    });
-  } catch (error) {
-    console.error("Logout error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
-  }
+  return res.status(200).json({
+    success: true,
+    message: "Logged out successfully.",
+  });
 };
- // PROFILE CONTROLLER
- 
- const Profile = async (req,res)=>{
-  try{
-    const user = await User.findById(req.user._id).select("-password")
-    if(!user){
-      res.status(404).json({message : "User Not Found"});
-    }
-    res.status(200).json({user});
-  }
-  catch(error){
-    console.error("Profile Error", error.message);
-    res.status(500).json({message : "Server Error"});
 
-  }
- }
+// CURRENT USER / SESSION RESTORATION
+const Me = (req, res) => {
+  return res.status(200).json({
+    success: true,
+    user: formatUser(req.user),
+  });
+};
 
 module.exports = {
   SignUp,
-  Login,Logout,Profile
+  FacultySignUp,
+  Login,
+  Logout,
+  Me,
 };
-
