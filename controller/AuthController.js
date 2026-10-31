@@ -3,6 +3,10 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
 const createToken = (user) => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error("JWT_SECRET is missing from the .env file.");
+  }
+
   return jwt.sign(
     {
       id: user._id,
@@ -14,13 +18,13 @@ const createToken = (user) => {
     }
   );
 };
-
 const setAuthCookie = (res, token) => {
   res.cookie("token", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: false, // Local development over HTTP
     sameSite: "lax",
     maxAge: 24 * 60 * 60 * 1000,
+    path: "/",
   });
 };
 
@@ -324,8 +328,9 @@ const Login = async (req, res) => {
 const Logout = (req, res) => {
   res.clearCookie("token", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: false,
     sameSite: "lax",
+    path: "/",
   });
 
   return res.status(200).json({
@@ -333,7 +338,6 @@ const Logout = (req, res) => {
     message: "Logged out successfully.",
   });
 };
-
 // CURRENT USER / SESSION RESTORATION
 const Me = (req, res) => {
   return res.status(200).json({

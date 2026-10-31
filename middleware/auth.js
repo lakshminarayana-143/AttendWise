@@ -1,23 +1,14 @@
+
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
 const authMiddleware = async (req, res, next) => {
   try {
-    // 1. Check JWT configuration
-    if (!process.env.JWT_SECRET) {
-      console.error("JWT_SECRET is missing from .env");
-
-      return res.status(500).json({
-        success: false,
-        message: "Server authentication configuration error.",
-      });
-    }
-
-    // 2. Read token from HTTP-only cookie
+    // Read JWT from the HTTP-only cookie
     const token = req.cookies?.token;
 
     if (!token) {
-      console.log("Authentication failed: token cookie missing");
+      console.log("Authentication failed: token is missing");
 
       return res.status(401).json({
         success: false,
@@ -25,43 +16,37 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    // 3. Verify JWT
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (!process.env.JWT_SECRET) {
+      console.error("JWT_SECRET is missing from environment variables");
 
-    if (!decoded.id) {
-      return res.status(401).json({
+      return res.status(500).json({
         success: false,
-        message: "Invalid authentication token.",
+        message: "Server authentication configuration error.",
       });
     }
 
-    // 4. Find user in MongoDB
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
     const user = await User.findById(decoded.id);
 
     if (!user) {
-      console.log("Authentication failed: user not found");
-
       return res.status(401).json({
         success: false,
         message: "User account not found.",
       });
     }
 
-    // 5. Attach authenticated user
     req.user = user;
-
     next();
   } catch (error) {
-    console.error("Authentication error:", error.message);
+    console.error("Authentication middleware error:", error.message);
 
     return res.status(401).json({
       success: false,
-      message:
-        error.name === "TokenExpiredError"
-          ? "Your session has expired. Please log in again."
-          : "Invalid authentication token. Please log in again.",
+      message: "Invalid or expired authentication token.",
     });
   }
 };
 
 module.exports = authMiddleware;
+
