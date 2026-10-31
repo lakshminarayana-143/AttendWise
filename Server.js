@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const dotenv = require("dotenv");
+const connectDB = require("./config/db");
 
 dotenv.config();
 
@@ -38,7 +39,11 @@ app.use("/Auth", Auth);
 // Start the server.
 // Keep your existing MongoDB connection setup if it is already in this file.
 const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
+connectDB().then(()=>{
+  app.listen(PORT, () => {
+  
   console.log(`AttendWise server running on port ${PORT}`);
+});
+}).catch((err)=>{
+  console.log(err)
 });
