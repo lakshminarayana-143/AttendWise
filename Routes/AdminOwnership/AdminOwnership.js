@@ -3,7 +3,13 @@ const router = express.Router();
 
 const AdminOwnershipController = require("../../controller/AdminOwnershipController");
 
-// One-time OG Admin setup
+// Check whether initial setup is required
+router.get(
+  "/status",
+  AdminOwnershipController.getSetupStatus
+);
+
+// Create the first OG Admin
 router.post(
   "/setup",
   AdminOwnershipController.createFirstOwner
@@ -15,4 +21,4 @@ router.get(
   AdminOwnershipController.getOwner
 );
 
-module.exports = router;
+module.exports = router;    

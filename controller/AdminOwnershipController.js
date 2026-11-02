@@ -79,7 +79,7 @@ const createFirstOwner = async (req, res) => {
             },
           },
         ],
-        { session }
+        { session },
       );
 
       await AdminOwnership.create(
@@ -89,7 +89,7 @@ const createFirstOwner = async (req, res) => {
             owner: admin._id,
           },
         ],
-        { session }
+        { session },
       );
     });
 
@@ -150,8 +150,28 @@ const getOwner = async (req, res) => {
     });
   }
 };
+// Check whether initial OG Admin setup is required
+const getSetupStatus = async (req, res) => {
+  try {
+    const ownership = await AdminOwnership.findOne({
+      key: "ATTENDWISE_OWNER",
+    }).select("_id");
 
+    return res.status(200).json({
+      success: true,
+      setupRequired: !ownership,
+    });
+  } catch (error) {
+    console.error("Admin setup status error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to check admin setup status.",
+    });
+  }
+};
 module.exports = {
   createFirstOwner,
   getOwner,
+  getSetupStatus,
 };
