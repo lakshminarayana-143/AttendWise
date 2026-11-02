@@ -1,14 +1,19 @@
+const dotenv = require("dotenv");
+dotenv.config();
+
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const dotenv = require("dotenv");
+
 const connectDB = require("./config/db");
 
-dotenv.config();
+// Import routes
+const Auth = require("./Routes/Authentication/Auth");
+const Subject = require("./Routes/Subject/Subject");
 
 const app = express();
 
-// Middleware must be configured after creating the Express app.
+// CORS configuration
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:5173",
@@ -18,12 +23,10 @@ app.use(
   })
 );
 
+// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
-// Route imports
-const Auth = require("./Routes/Authentication/Auth");
 
 // Health check
 app.get("/", (req, res) => {
@@ -33,17 +36,24 @@ app.get("/", (req, res) => {
   });
 });
 
-// Authentication routes
+// API routes
 app.use("/Auth", Auth);
+app.use("/Subject", Subject);
 
-// Start the server.
-// Keep your existing MongoDB connection setup if it is already in this file.
+// Start server after database connection
 const PORT = process.env.PORT || 3000;
-connectDB().then(()=>{
-  app.listen(PORT, () => {
-  
-  console.log(`AttendWise server running on port ${PORT}`);
-});
-}).catch((err)=>{
-  console.log(err)
-});
+
+const startServer = async () => {
+  try {
+    await connectDB();
+
+    app.listen(PORT, () => {
+      console.log(`AttendWise server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Server startup failed:", error.message);
+    process.exit(1);
+  }
+};
+
+startServer();
