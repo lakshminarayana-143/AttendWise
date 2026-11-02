@@ -11,6 +11,7 @@ const connectDB = require("./config/db");
 const Auth = require("./Routes/Authentication/Auth");
 const Subject = require("./Routes/Subject/Subject");
 const Attendance = require("./Routes/Attendance/Attendance");
+const Admin = require("./Routes/Admin/Admin");
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.get("/", (req, res) => {
 app.use("/Auth", Auth);
 app.use("/Subject", Subject);
 app.use("/Attendance", Attendance);
+app.use("/Admin", Admin);
 
 // Start server after database connection
 const PORT = process.env.PORT || 3000;
