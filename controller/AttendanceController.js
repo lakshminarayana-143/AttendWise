@@ -1,130 +1,103 @@
-const mongoose = require("mongoose");
 const Attendance = require("../models/Attendance");
 const Subject = require("../models/Subject");
 const User = require("../models/User");
 
-// MARK ATTENDANCE
+// MARK ATTENDANCE — Faculty only
 const markAttendance = async (req, res) => {
   try {
-    const { subjectId, date, records } = req.body;
-
-    // Validate required fields
-    if (
-      !subjectId ||
-      !date ||
-      !Array.isArray(records) ||
-      records.length === 0
-    ) {
-      return res.status(400).json({
+    if (req.user.role !== "faculty") {
+      return res.status(403).json({
         success: false,
-        message: "Subject, date, and attendance records are required",
+        message: "Only faculty members can mark attendance.",
       });
     }
 
-    if (!mongoose.isValidObjectId(subjectId)) {
+    const { subjectId, date, session, records } = req.body;
+
+    if (!subjectId || !date || !Array.isArray(records) || records.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Invalid subject ID",
+        message: "Subject, date and attendance records are required.",
       });
     }
 
-    const classDate = new Date(date);
+    const attendanceDate = new Date(`${date}T00:00:00.000Z`);
 
-    if (Number.isNaN(classDate.getTime())) {
+    if (Number.isNaN(attendanceDate.getTime())) {
       return res.status(400).json({
         success: false,
-        message: "Invalid attendance date",
+        message: "Invalid attendance date.",
       });
     }
 
-    // Normalize the date to the start of the UTC day
-    classDate.setUTCHours(0, 0, 0, 0);
-
-    // Validate attendance records
-    const studentIds = [];
-
-    for (const record of records) {
-      if (
-        !record.studentId ||
-        !mongoose.isValidObjectId(record.studentId) ||
-        !["present", "absent"].includes(record.status)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Each record needs a valid student ID and status",
-        });
-      }
-
-      studentIds.push(record.studentId);
-    }
-
-    // Reject duplicate students in the same request
-    if (new Set(studentIds.map(String)).size !== studentIds.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Duplicate students are not allowed",
-      });
-    }
-
-    // Check the subject
-    const subject = await Subject.findById(subjectId);
+    // Verify subject ownership
+    const subject = await Subject.findOne({
+      _id: subjectId,
+      faculty: req.user._id,
+    });
 
     if (!subject) {
       return res.status(404).json({
         success: false,
-        message: "Subject not found",
+        message: "Subject not found or access denied.",
       });
     }
 
-    // Only the faculty assigned to this subject can mark attendance
-    if (String(subject.faculty) !== String(req.user.id)) {
-      return res.status(403).json({
-        success: false,
-        message: "You cannot mark attendance for this subject",
-      });
-    }
+    // Validate attendance records
+    const studentIds = records.map((record) => record.studentId);
 
-    // Every submitted student must be enrolled in the subject
-    const enrolledStudentIds = new Set(
-      subject.students.map((id) => String(id))
-    );
-
-    const allStudentsEnrolled = studentIds.every((id) =>
-      enrolledStudentIds.has(String(id))
-    );
-
-    if (!allStudentsEnrolled) {
+    if (
+      studentIds.some((id) => !id) ||
+      new Set(studentIds.map(String)).size !== studentIds.length
+    ) {
       return res.status(400).json({
         success: false,
-        message: "All students must be enrolled in this subject",
+        message: "Every student must have a unique student ID.",
       });
     }
 
-    // Check that submitted users are students
+    for (const record of records) {
+      if (!["present", "absent"].includes(record.status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Attendance status must be present or absent.",
+        });
+      }
+    }
+
+    // Verify students belong to this subject's department and year
     const students = await User.find({
       _id: { $in: studentIds },
       role: "student",
+      isApproved: true,
+      department: subject.department,
+      year: subject.year,
     }).select("_id");
 
     if (students.length !== studentIds.length) {
       return res.status(400).json({
         success: false,
-        message: "One or more student accounts are invalid",
+        message:
+          "One or more students are invalid or do not belong to this subject's department and year.",
       });
     }
 
-    // Insert or update attendance records
+    const attendanceSession = session?.trim() || "Regular";
+
+    // Insert or update attendance
     const operations = records.map((record) => ({
       updateOne: {
         filter: {
+          subject: subject._id,
           student: record.studentId,
-          subject: subjectId,
-          date: classDate,
+          date: attendanceDate,
+          session: attendanceSession,
         },
         update: {
           $set: {
             status: record.status,
-            markedBy: req.user.id,
+            remarks: record.remarks || "",
+            markedBy: req.user._id,
           },
         },
         upsert: true,
@@ -135,147 +108,129 @@ const markAttendance = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Attendance marked successfully",
-      totalRecords: records.length,
+      message: "Attendance marked successfully.",
+      totalStudents: records.length,
     });
   } catch (error) {
     console.error("Mark attendance error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to mark attendance",
+      message: "Unable to mark attendance.",
     });
   }
 };
 
-// VIEW MY ATTENDANCE — STUDENT
+// GET STUDENT ATTENDANCE — Student only
 const getMyAttendance = async (req, res) => {
   try {
-    const records = await Attendance.find({
-      student: req.user.id,
-    })
-      .populate("subject", "name code")
-      .sort({ date: -1 });
+    if (req.user.role !== "student") {
+      return res.status(403).json({
+        success: false,
+        message: "Only students can access their attendance history.",
+      });
+    }
+
+    const filter = {
+      student: req.user._id,
+    };
+
+    if (req.query.subjectId) {
+      filter.subject = req.query.subjectId;
+    }
+
+    const attendance = await Attendance.find(filter)
+      .populate("subject", "name code department year")
+      .populate("markedBy", "name email")
+      .sort({ date: -1, createdAt: -1 });
+
+    const total = attendance.length;
+    const present = attendance.filter(
+      (item) => item.status === "present"
+    ).length;
+    const absent = attendance.filter(
+      (item) => item.status === "absent"
+    ).length;
+
+    const percentage =
+      total > 0 ? Number(((present / total) * 100).toFixed(2)) : 0;
 
     return res.status(200).json({
       success: true,
-      count: records.length,
-      attendance: records,
+      summary: {
+        total,
+        present,
+        absent,
+        percentage,
+      },
+      attendance,
     });
   } catch (error) {
     console.error("Get student attendance error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch attendance",
+      message: "Unable to fetch attendance history.",
     });
   }
 };
 
-// VIEW ATTENDANCE FOR A SUBJECT — FACULTY
+// GET SUBJECT ATTENDANCE — Faculty only
 const getSubjectAttendance = async (req, res) => {
   try {
-    const { subjectId } = req.params;
-
-    if (!mongoose.isValidObjectId(subjectId)) {
-      return res.status(400).json({
+    if (req.user.role !== "faculty") {
+      return res.status(403).json({
         success: false,
-        message: "Invalid subject ID",
+        message: "Only faculty members can view subject attendance.",
       });
     }
 
-    const subject = await Subject.findById(subjectId);
+    const subject = await Subject.findOne({
+      _id: req.params.subjectId,
+      faculty: req.user._id,
+    });
 
     if (!subject) {
       return res.status(404).json({
         success: false,
-        message: "Subject not found",
+        message: "Subject not found or access denied.",
       });
     }
 
-    if (String(subject.faculty) !== String(req.user.id)) {
-      return res.status(403).json({
-        success: false,
-        message: "You cannot access this subject",
-      });
+    const filter = {
+      subject: subject._id,
+    };
+
+    if (req.query.date) {
+      const selectedDate = new Date(`${req.query.date}T00:00:00.000Z`);
+
+      if (Number.isNaN(selectedDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid date.",
+        });
+      }
+
+      filter.date = selectedDate;
     }
 
-    const records = await Attendance.find({
-      subject: subjectId,
-    })
-      .populate("student", "name email studentId")
-      .sort({ date: -1 });
+    const attendance = await Attendance.find(filter)
+      .populate("student", "name email studentId department year")
+      .populate("markedBy", "name")
+      .sort({ date: -1, createdAt: -1 });
 
     return res.status(200).json({
       success: true,
-      count: records.length,
-      attendance: records,
+      subject,
+      count: attendance.length,
+      attendance,
     });
   } catch (error) {
     console.error("Get subject attendance error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch subject attendance",
-    });
-  }
-};
-
-// ATTENDANCE SUMMARY — STUDENT
-const getMyAttendanceSummary = async (req, res) => {
-  try {
-    const records = await Attendance.find({
-      student: req.user.id,
-    }).populate("subject", "name code");
-
-    const summary = {};
-
-    for (const record of records) {
-      if (!record.subject) continue;
-
-      const subjectId = String(record.subject._id);
-
-      if (!summary[subjectId]) {
-        summary[subjectId] = {
-          subjectId,
-          subjectName: record.subject.name,
-          subjectCode: record.subject.code,
-          totalClasses: 0,
-          attendedClasses: 0,
-          percentage: 0,
-        };
-      }
-
-      summary[subjectId].totalClasses += 1;
-
-      if (record.status === "present") {
-        summary[subjectId].attendedClasses += 1;
-      }
-    }
-
-    const subjects = Object.values(summary).map((item) => ({
-      ...item,
-      percentage:
-        item.totalClasses === 0
-          ? 0
-          : Number(
-              (
-                (item.attendedClasses / item.totalClasses) *
-                100
-              ).toFixed(2)
-            ),
-    }));
-
-    return res.status(200).json({
-      success: true,
-      subjects,
-    });
-  } catch (error) {
-    console.error("Attendance summary error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to calculate attendance summary",
+      message: "Unable to fetch subject attendance.",
     });
   }
 };
@@ -284,5 +239,4 @@ module.exports = {
   markAttendance,
   getMyAttendance,
   getSubjectAttendance,
-  getMyAttendanceSummary,
 };

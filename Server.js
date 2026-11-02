@@ -10,6 +10,7 @@ const connectDB = require("./config/db");
 // Import routes
 const Auth = require("./Routes/Authentication/Auth");
 const Subject = require("./Routes/Subject/Subject");
+const Attendance = require("./Routes/Attendance/Attendance");
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.get("/", (req, res) => {
 // API routes
 app.use("/Auth", Auth);
 app.use("/Subject", Subject);
+app.use("/Attendance", Attendance);
 
 // Start server after database connection
 const PORT = process.env.PORT || 3000;

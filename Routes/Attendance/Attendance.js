@@ -1,46 +1,28 @@
 const express = require("express");
 const router = express.Router();
 
-const {
-  markAttendance,
-  getMyAttendance,
-  getSubjectAttendance,
-  getMyAttendanceSummary,
-} = require("../../controllers/attendanceController");
+const AttendanceController = require("../../controller/AttendanceController");
+const authMiddleware = require("../../middleware/auth");
 
-const authMiddleware = require("../../middleware/authMiddleware");
-const roleMiddleware = require("../../middleware/roleMiddleware");
-
-// Faculty marks attendance
+// Faculty: Mark attendance
 router.post(
   "/mark",
   authMiddleware,
-  roleMiddleware("faculty"),
-  markAttendance
+  AttendanceController.markAttendance
 );
 
-// Students view their own attendance
+// Student: View personal attendance history
 router.get(
-  "/my",
+  "/my-attendance",
   authMiddleware,
-  roleMiddleware("student"),
-  getMyAttendance
+  AttendanceController.getMyAttendance
 );
 
-// Students view attendance percentages
-router.get(
-  "/my/summary",
-  authMiddleware,
-  roleMiddleware("student"),
-  getMyAttendanceSummary
-);
-
-// Faculty views attendance for their subjects
+// Faculty: View attendance for a subject
 router.get(
   "/subject/:subjectId",
   authMiddleware,
-  roleMiddleware("faculty"),
-  getSubjectAttendance
+  AttendanceController.getSubjectAttendance
 );
 
 module.exports = router;
