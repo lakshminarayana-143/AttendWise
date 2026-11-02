@@ -12,6 +12,8 @@ const Auth = require("./Routes/Authentication/Auth");
 const Subject = require("./Routes/Subject/Subject");
 const Attendance = require("./Routes/Attendance/Attendance");
 const Admin = require("./Routes/Admin/Admin");
+const AdminOwnership = require("./Routes/AdminOwnership/AdminOwnership");
+
 
 const app = express();
 
@@ -43,6 +45,7 @@ app.use("/Auth", Auth);
 app.use("/Subject", Subject);
 app.use("/Attendance", Attendance);
 app.use("/Admin", Admin);
+app.use("/AdminOwnership", AdminOwnership);
 
 // Start server after database connection
 const PORT = process.env.PORT || 3000;

@@ -55,9 +55,53 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
+    // Administrative ownership and temporary access
+    adminAccess: {
+      type: {
+        type: String,
+        enum: ["owner", "temporary"],
+        default: null,
+      },
+
+      grantedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+
+      expiresAt: {
+        type: Date,
+        default: null,
+      },
+
+      previousRole: {
+        type: String,
+        enum: ["student", "faculty"],
+        default: null,
+      },
+    },
+
+    // Used to invalidate existing login sessions after role changes
+    sessionVersion: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,
+  }
+);
+
+// Database-level protection: only one OG Admin can exist.
+userSchema.index(
+  { "adminAccess.type": 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      "adminAccess.type": "owner",
+    },
+    name: "one_og_admin_only",
   }
 );
 

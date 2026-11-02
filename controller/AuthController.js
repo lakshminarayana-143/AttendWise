@@ -39,6 +39,85 @@ const formatUser = (user) => ({
   facultyId: user.facultyId,
   isApproved: user.isApproved,
 });
+// ONE-TIME ADMIN ACCOUNT SETUP
+const CreateFirstAdmin = async (req, res) => {
+  try {
+    const { name, email, password, setupSecret } = req.body;
+
+    if (!name?.trim() || !email?.trim() || !password || !setupSecret) {
+      return res.status(400).json({
+        success: false,
+        message: "All admin details are required.",
+      });
+    }
+
+    if (!process.env.ADMIN_SETUP_SECRET) {
+      return res.status(500).json({
+        success: false,
+        message: "Admin setup is not configured.",
+      });
+    }
+
+    if (setupSecret !== process.env.ADMIN_SETUP_SECRET) {
+      return res.status(403).json({
+        success: false,
+        message: "Invalid admin setup secret.",
+      });
+    }
+
+    const existingAdmin = await User.findOne({ role: "admin" });
+
+    if (existingAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "An admin account already exists.",
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "This email is already registered.",
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must contain at least 8 characters.",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const admin = await User.create({
+      name: name.trim(),
+      email: normalizedEmail,
+      password: hashedPassword,
+      role: "admin",
+      isApproved: true,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "First admin account created successfully.",
+      user: formatUser(admin),
+    });
+  } catch (error) {
+    console.error("Admin setup error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to create admin account.",
+    });
+  }
+};
 
 // STUDENT REGISTRATION
 const SignUp = async (req, res) => {
@@ -352,4 +431,5 @@ module.exports = {
   Login,
   Logout,
   Me,
+  CreateFirstAdmin,
 };
