@@ -1,15 +1,11 @@
-
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
 const authMiddleware = async (req, res, next) => {
   try {
-    // Read JWT from the HTTP-only cookie
     const token = req.cookies?.token;
 
     if (!token) {
-      console.log("Authentication failed: token is missing");
-
       return res.status(401).json({
         success: false,
         message: "Authentication required. Please log in.",
@@ -36,6 +32,16 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
+    // Validate session version to invalidate old tokens
+    const currentSessionVersion = user.sessionVersion ?? 0;
+
+    if (decoded.sessionVersion !== currentSessionVersion) {
+      return res.status(401).json({
+        success: false,
+        message: "Your session has expired. Please log in again.",
+      });
+    }
+
     req.user = user;
     next();
   } catch (error) {
@@ -49,4 +55,3 @@ const authMiddleware = async (req, res, next) => {
 };
 
 module.exports = authMiddleware;
-
