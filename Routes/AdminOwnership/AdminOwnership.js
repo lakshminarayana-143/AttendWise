@@ -1,24 +1,29 @@
+
 const express = require("express");
 const router = express.Router();
 
 const AdminOwnershipController = require("../../controller/AdminOwnershipController");
+const authMiddleware = require("../../middleware/auth");
+const roleMiddleware = require("../../middleware/role");
 
-// Check whether initial setup is required
+// Public: Check whether initial setup is required
 router.get(
   "/status",
   AdminOwnershipController.getSetupStatus
 );
 
-// Create the first OG Admin
+// Public: Create the first OG Admin using the setup secret
 router.post(
   "/setup",
   AdminOwnershipController.createFirstOwner
 );
 
-// Get current OG Admin information
+// Protected: Only authenticated admins can view OG Admin information
 router.get(
   "/owner",
+  authMiddleware,
+  roleMiddleware("admin"),
   AdminOwnershipController.getOwner
 );
 
-module.exports = router;    
+module.exports = router;

@@ -1,3 +1,4 @@
+
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
@@ -6,7 +7,7 @@ const AdminOwnership = require("../models/AdminOwnership");
 
 // Create the first and only OG Admin
 const createFirstOwner = async (req, res) => {
-  const session = await mongoose.startSession();
+  let session;
 
   try {
     const { name, email, password, setupSecret } = req.body;
@@ -41,16 +42,7 @@ const createFirstOwner = async (req, res) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    const existingUser = await User.findOne({
-      email: normalizedEmail,
-    });
-
-    if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        message: "This email is already registered.",
-      });
-    }
+    session = await mongoose.startSession();
 
     await session.withTransaction(async () => {
       const existingOwnership = await AdminOwnership.findOne({
@@ -59,6 +51,14 @@ const createFirstOwner = async (req, res) => {
 
       if (existingOwnership) {
         throw new Error("OG Admin has already been established.");
+      }
+
+      const existingUser = await User.findOne({
+        email: normalizedEmail,
+      }).session(session);
+
+      if (existingUser) {
+        throw new Error("This email is already registered.");
       }
 
       const hashedPassword = await bcrypt.hash(password, 12);
@@ -79,7 +79,7 @@ const createFirstOwner = async (req, res) => {
             },
           },
         ],
-        { session },
+        { session }
       );
 
       await AdminOwnership.create(
@@ -89,7 +89,7 @@ const createFirstOwner = async (req, res) => {
             owner: admin._id,
           },
         ],
-        { session },
+        { session }
       );
     });
 
@@ -100,7 +100,10 @@ const createFirstOwner = async (req, res) => {
   } catch (error) {
     console.error("Create OG Admin error:", error);
 
-    if (error.message === "OG Admin has already been established.") {
+    if (
+      error.message === "OG Admin has already been established." ||
+      error.message === "This email is already registered."
+    ) {
       return res.status(409).json({
         success: false,
         message: error.message,
@@ -110,7 +113,7 @@ const createFirstOwner = async (req, res) => {
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "An OG Admin already exists.",
+        message: "An OG Admin or registered email already exists.",
       });
     }
 
@@ -119,7 +122,9 @@ const createFirstOwner = async (req, res) => {
       message: "Unable to establish OG Admin.",
     });
   } finally {
-    await session.endSession();
+    if (session) {
+      await session.endSession();
+    }
   }
 };
 
@@ -128,9 +133,9 @@ const getOwner = async (req, res) => {
   try {
     const ownership = await AdminOwnership.findOne({
       key: "ATTENDWISE_OWNER",
-    }).populate("owner", "name email role");
+    }).populate("owner", "name role");
 
-    if (!ownership) {
+    if (!ownership || !ownership.owner) {
       return res.status(404).json({
         success: false,
         message: "OG Admin has not been established.",
@@ -150,6 +155,7 @@ const getOwner = async (req, res) => {
     });
   }
 };
+
 // Check whether initial OG Admin setup is required
 const getSetupStatus = async (req, res) => {
   try {
@@ -170,6 +176,7 @@ const getSetupStatus = async (req, res) => {
     });
   }
 };
+
 module.exports = {
   createFirstOwner,
   getOwner,
