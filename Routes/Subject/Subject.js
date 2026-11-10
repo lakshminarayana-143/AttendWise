@@ -1,41 +1,53 @@
+
 const express = require("express");
 const router = express.Router();
 
 const SubjectController = require("../../controller/SubjectController");
 const authMiddleware = require("../../middleware/auth");
+const roleMiddleware = require("../../middleware/role");
 
-// Create a new subject — Faculty only
+// All subject routes require authentication.
+router.use(authMiddleware);
+
+// Create subject — Approved faculty only.
 router.post(
   "/create",
-  authMiddleware,
+  roleMiddleware("faculty"),
   SubjectController.createSubject
 );
 
-// Get subjects based on logged-in user's role
+// Get subjects based on logged-in user's role.
 router.get(
   "/all",
-  authMiddleware,
+  roleMiddleware("student", "faculty", "admin"),
   SubjectController.getAllSubjects
 );
 
-// Get subjects created by the logged-in faculty
+// Get subjects created by the logged-in faculty.
 router.get(
   "/my-subjects",
-  authMiddleware,
+  roleMiddleware("faculty"),
   SubjectController.getMySubjects
 );
 
-// Update a subject
+// Get students belonging to a subject — Faculty only.
+router.get(
+  "/:subjectId/students",
+  roleMiddleware("faculty"),
+  SubjectController.getStudentsBySubject
+);
+
+// Update subject — Faculty only.
 router.put(
   "/:id",
-  authMiddleware,
+  roleMiddleware("faculty"),
   SubjectController.updateSubject
 );
 
-// Delete a subject
+// Delete subject — Faculty only.
 router.delete(
   "/:id",
-  authMiddleware,
+  roleMiddleware("faculty"),
   SubjectController.deleteSubject
 );
 
