@@ -1,4 +1,3 @@
-
 const express = require("express");
 const router = express.Router();
 
@@ -6,11 +5,17 @@ const AdminManagementController = require("../../controller/AdminManagementContr
 const authMiddleware = require("../../middleware/auth");
 const ownerMiddleware = require("../../middleware/owner");
 
-// All routes in this file require OG Admin authentication
+// Protect all routes: OG Admin only
 router.use(authMiddleware);
 router.use(ownerMiddleware);
 
-// Appoint a student or faculty member as temporary admin
+// Get eligible students and approved faculty
+router.get(
+  "/eligible-users",
+  AdminManagementController.getEligibleUsers
+);
+
+// Appoint temporary admin
 router.post(
   "/temporary-admins",
   AdminManagementController.appointTemporaryAdmin

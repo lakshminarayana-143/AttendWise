@@ -2,7 +2,35 @@
 const mongoose = require("mongoose");
 const User = require("../models/User");
 
-// Appoint an existing student or faculty member as a temporary admin
+// Get eligible students and approved faculty members
+const getEligibleUsers = async (req, res) => {
+  try {
+    const users = await User.find({
+      role: { $in: ["student", "faculty"] },
+      $or: [
+        { role: "student" },
+        { role: "faculty", isApproved: true },
+      ],
+    })
+      .select("name email role studentId facultyId department year")
+      .sort({ name: 1 });
+
+    return res.status(200).json({
+      success: true,
+      count: users.length,
+      users,
+    });
+  } catch (error) {
+    console.error("Get eligible users error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch eligible users.",
+    });
+  }
+};
+
+// Appoint a student or faculty member as temporary admin
 const appointTemporaryAdmin = async (req, res) => {
   try {
     const { userId, expiresAt } = req.body;
@@ -14,31 +42,35 @@ const appointTemporaryAdmin = async (req, res) => {
       });
     }
 
-    const expiryDate = new Date(expiresAt);
-
-    if (!expiresAt || Number.isNaN(expiryDate.getTime())) {
+    if (!expiresAt) {
       return res.status(400).json({
         success: false,
-        message: "A valid expiry date is required.",
+        message: "Expiry date is required.",
       });
     }
 
-    if (expiryDate <= new Date()) {
+    const expiryDate = new Date(expiresAt);
+
+    if (Number.isNaN(expiryDate.getTime()) || expiryDate <= new Date()) {
       return res.status(400).json({
         success: false,
-        message: "Expiry date must be in the future.",
+        message: "Expiry date must be valid and in the future.",
       });
     }
 
     const targetUser = await User.findOne({
       _id: userId,
       role: { $in: ["student", "faculty"] },
+      $or: [
+        { role: "student" },
+        { role: "faculty", isApproved: true },
+      ],
     });
 
     if (!targetUser) {
       return res.status(404).json({
         success: false,
-        message: "Eligible student or faculty account not found.",
+        message: "Eligible student or approved faculty member not found.",
       });
     }
 
@@ -48,7 +80,7 @@ const appointTemporaryAdmin = async (req, res) => {
       {
         _id: userId,
         role: previousRole,
-        "adminAccess.type": { $nin: ["owner", "temporary"] },
+        ...(previousRole === "faculty" ? { isApproved: true } : {}),
       },
       {
         $set: {
@@ -68,7 +100,7 @@ const appointTemporaryAdmin = async (req, res) => {
         new: true,
         runValidators: true,
       }
-    ).select("name email role adminAccess sessionVersion");
+    ).select("name email role adminAccess");
 
     if (!updatedUser) {
       return res.status(409).json({
@@ -118,7 +150,7 @@ const getTemporaryAdmins = async (req, res) => {
   }
 };
 
-// Revoke temporary admin access and restore the original role
+// Revoke temporary admin access and restore original role
 const revokeTemporaryAdmin = async (req, res) => {
   try {
     const { id } = req.params;
@@ -183,6 +215,7 @@ const revokeTemporaryAdmin = async (req, res) => {
 };
 
 module.exports = {
+  getEligibleUsers,
   appointTemporaryAdmin,
   getTemporaryAdmins,
   revokeTemporaryAdmin,

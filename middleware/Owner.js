@@ -1,4 +1,3 @@
-
 const AdminOwnership = require("../models/AdminOwnership");
 
 const ownerMiddleware = async (req, res, next) => {
@@ -10,10 +9,7 @@ const ownerMiddleware = async (req, res, next) => {
       });
     }
 
-    if (
-      req.user.role !== "admin" ||
-      req.user.adminAccess?.type !== "owner"
-    ) {
+    if (req.user.role !== "admin" || req.user.adminAccess?.type !== "owner") {
       return res.status(403).json({
         success: false,
         message: "Only the original owner can perform this operation.",
@@ -44,4 +40,3 @@ const ownerMiddleware = async (req, res, next) => {
 };
 
 module.exports = ownerMiddleware;
-  
