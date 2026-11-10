@@ -3,25 +3,29 @@ const router = express.Router();
 
 const AttendanceController = require("../../controller/AttendanceController");
 const authMiddleware = require("../../middleware/auth");
+const roleMiddleware = require("../../middleware/role");
 
-// Faculty: Mark attendance
+// All attendance routes require authentication.
+router.use(authMiddleware);
+
+// Faculty: Mark attendance.
 router.post(
   "/mark",
-  authMiddleware,
+  roleMiddleware("faculty"),
   AttendanceController.markAttendance
 );
 
-// Student: View personal attendance history
+// Student: View personal attendance history.
 router.get(
   "/my-attendance",
-  authMiddleware,
+  roleMiddleware("student"),
   AttendanceController.getMyAttendance
 );
 
-// Faculty: View attendance for a subject
+// Faculty: View attendance for a subject.
 router.get(
   "/subject/:subjectId",
-  authMiddleware,
+  roleMiddleware("faculty"),
   AttendanceController.getSubjectAttendance
 );
 
