@@ -79,7 +79,6 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // Verify subject ownership.
     const subject = await Subject.findOne({
       _id: subjectId,
       faculty: req.user._id,
@@ -92,16 +91,13 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // Validate student IDs and attendance records.
     const studentIds = records.map(
       (record) => record?.studentId
     );
 
     if (
       studentIds.some(
-        (id) =>
-          !id ||
-          !mongoose.isValidObjectId(id)
+        (id) => !id || !mongoose.isValidObjectId(id)
       ) ||
       new Set(studentIds.map(String)).size !== studentIds.length
     ) {
@@ -130,7 +126,6 @@ const markAttendance = async (req, res) => {
       }
     }
 
-    // Verify students belong to this subject's department and year.
     const students = await User.find({
       _id: { $in: studentIds },
       role: "student",
@@ -147,7 +142,6 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // Insert or update attendance.
     const operations = records.map((record) => ({
       updateOne: {
         filter: {
@@ -250,7 +244,7 @@ const getMyAttendance = async (req, res) => {
 // GET SUBJECT ATTENDANCE — Faculty only
 const getSubjectAttendance = async (req, res) => {
   try {
-    if (req.user.role !== "faculty" || !req.user.isApproved) {
+    if (!req.user.isApproved) {
       return res.status(403).json({
         success: false,
         message: "Only approved faculty members can view attendance.",
@@ -314,8 +308,196 @@ const getSubjectAttendance = async (req, res) => {
   }
 };
 
+// GET ATTENDANCE REPORT — Faculty only
+const getAttendanceReport = async (req, res) => {
+  try {
+    if (req.user.role !== "faculty" || !req.user.isApproved) {
+      return res.status(403).json({
+        success: false,
+        message: "Only approved faculty members can view reports.",
+      });
+    }
+
+    const { subjectId } = req.params;
+    const { startDate, endDate } = req.query;
+
+    if (!mongoose.isValidObjectId(subjectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid subject ID.",
+      });
+    }
+
+    // Verify that this subject belongs to the logged-in faculty.
+    const subject = await Subject.findOne({
+      _id: subjectId,
+      faculty: req.user._id,
+    });
+
+    if (!subject) {
+      return res.status(404).json({
+        success: false,
+        message: "Subject not found or access denied.",
+      });
+    }
+
+    // Build date filter.
+    const attendanceFilter = {
+      subject: subject._id,
+    };
+
+    if (startDate || endDate) {
+      const dateFilter = {};
+
+      if (startDate) {
+        const start = parseAttendanceDate(startDate);
+
+        if (!start) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid start date.",
+          });
+        }
+
+        dateFilter.$gte = start;
+      }
+
+      if (endDate) {
+        const end = parseAttendanceDate(endDate);
+
+        if (!end) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid end date.",
+          });
+        }
+
+        // Include the entire end date.
+        end.setUTCDate(end.getUTCDate() + 1);
+        dateFilter.$lt = end;
+      }
+
+      if (
+        dateFilter.$gte &&
+        dateFilter.$lt &&
+        dateFilter.$gte >= dateFilter.$lt
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Start date must be before or equal to end date.",
+        });
+      }
+
+      attendanceFilter.date = dateFilter;
+    }
+
+    // Get all currently approved students matching this subject.
+    const students = await User.find({
+      role: "student",
+      isApproved: true,
+      department: subject.department,
+      year: subject.year,
+    })
+      .select("_id name email studentId department year")
+      .sort({ name: 1 });
+
+    // Get attendance records for this subject and date range.
+    const attendanceRecords = await Attendance.find(
+      attendanceFilter
+    ).select("student status date session");
+
+    // Prepare student-wise report.
+    const studentMap = new Map();
+
+    for (const student of students) {
+      studentMap.set(String(student._id), {
+        student,
+        totalClasses: 0,
+        present: 0,
+        absent: 0,
+        percentage: 0,
+      });
+    }
+
+    let totalPresent = 0;
+    let totalAbsent = 0;
+
+    for (const record of attendanceRecords) {
+      const studentReport = studentMap.get(
+        String(record.student)
+      );
+
+      // Ignore records for students no longer in this cohort.
+      if (!studentReport) continue;
+
+      studentReport.totalClasses += 1;
+
+      if (record.status === "present") {
+        studentReport.present += 1;
+        totalPresent += 1;
+      } else if (record.status === "absent") {
+        studentReport.absent += 1;
+        totalAbsent += 1;
+      }
+    }
+
+    const report = Array.from(studentMap.values()).map(
+      (item) => {
+        item.percentage =
+          item.totalClasses > 0
+            ? Number(
+                (
+                  (item.present / item.totalClasses) *
+                  100
+                ).toFixed(2)
+              )
+            : 0;
+
+        return item;
+      }
+    );
+
+    const totalRecords = totalPresent + totalAbsent;
+
+    const classPercentage =
+      totalRecords > 0
+        ? Number(
+            ((totalPresent / totalRecords) * 100).toFixed(2)
+          )
+        : 0;
+
+    return res.status(200).json({
+      success: true,
+      subject,
+      filters: {
+        startDate: startDate || null,
+        endDate: endDate || null,
+      },
+      summary: {
+        totalStudents: students.length,
+        studentsWithAttendance: report.filter(
+          (item) => item.totalClasses > 0
+        ).length,
+        totalRecords,
+        present: totalPresent,
+        absent: totalAbsent,
+        percentage: classPercentage,
+      },
+      report,
+    });
+  } catch (error) {
+    console.error("Get attendance report error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to generate attendance report.",
+    });
+  }
+};
+
 module.exports = {
   markAttendance,
   getMyAttendance,
   getSubjectAttendance,
+  getAttendanceReport,
 };

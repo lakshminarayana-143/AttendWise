@@ -1,3 +1,4 @@
+
 const express = require("express");
 const router = express.Router();
 
@@ -27,6 +28,13 @@ router.get(
   "/subject/:subjectId",
   roleMiddleware("faculty"),
   AttendanceController.getSubjectAttendance
+);
+
+// Faculty: View subject-wise attendance report.
+router.get(
+  "/report/:subjectId",
+  roleMiddleware("faculty"),
+  AttendanceController.getAttendanceReport
 );
 
 module.exports = router;
