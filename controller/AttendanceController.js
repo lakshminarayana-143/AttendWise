@@ -1,36 +1,85 @@
+
+const mongoose = require("mongoose");
 const Attendance = require("../models/Attendance");
 const Subject = require("../models/Subject");
 const User = require("../models/User");
 
+// Validate YYYY-MM-DD without accepting invalid calendar dates.
+const parseAttendanceDate = (value) => {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(value)
+  ) {
+    return null;
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.toISOString().slice(0, 10) !== value
+  ) {
+    return null;
+  }
+
+  return date;
+};
+
 // MARK ATTENDANCE — Faculty only
 const markAttendance = async (req, res) => {
   try {
-    if (req.user.role !== "faculty") {
+    if (req.user.role !== "faculty" || !req.user.isApproved) {
       return res.status(403).json({
         success: false,
-        message: "Only faculty members can mark attendance.",
+        message: "Only approved faculty members can mark attendance.",
       });
     }
 
     const { subjectId, date, session, records } = req.body;
 
-    if (!subjectId || !date || !Array.isArray(records) || records.length === 0) {
+    if (
+      !subjectId ||
+      !date ||
+      !Array.isArray(records) ||
+      records.length === 0
+    ) {
       return res.status(400).json({
         success: false,
         message: "Subject, date and attendance records are required.",
       });
     }
 
-    const attendanceDate = new Date(`${date}T00:00:00.000Z`);
+    if (!mongoose.isValidObjectId(subjectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid subject ID.",
+      });
+    }
 
-    if (Number.isNaN(attendanceDate.getTime())) {
+    const attendanceDate = parseAttendanceDate(date);
+
+    if (!attendanceDate) {
       return res.status(400).json({
         success: false,
         message: "Invalid attendance date.",
       });
     }
 
-    // Verify subject ownership
+    const attendanceSession =
+      session === undefined ? "Regular" : session;
+
+    if (
+      typeof attendanceSession !== "string" ||
+      !attendanceSession.trim() ||
+      attendanceSession.trim().length > 50
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Session must contain 1 to 50 characters.",
+      });
+    }
+
+    // Verify subject ownership.
     const subject = await Subject.findOne({
       _id: subjectId,
       faculty: req.user._id,
@@ -43,16 +92,22 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // Validate attendance records
-    const studentIds = records.map((record) => record.studentId);
+    // Validate student IDs and attendance records.
+    const studentIds = records.map(
+      (record) => record?.studentId
+    );
 
     if (
-      studentIds.some((id) => !id) ||
+      studentIds.some(
+        (id) =>
+          !id ||
+          !mongoose.isValidObjectId(id)
+      ) ||
       new Set(studentIds.map(String)).size !== studentIds.length
     ) {
       return res.status(400).json({
         success: false,
-        message: "Every student must have a unique student ID.",
+        message: "Every student must have a unique valid student ID.",
       });
     }
 
@@ -63,9 +118,19 @@ const markAttendance = async (req, res) => {
           message: "Attendance status must be present or absent.",
         });
       }
+
+      if (
+        record.remarks !== undefined &&
+        typeof record.remarks !== "string"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Remarks must be text.",
+        });
+      }
     }
 
-    // Verify students belong to this subject's department and year
+    // Verify students belong to this subject's department and year.
     const students = await User.find({
       _id: { $in: studentIds },
       role: "student",
@@ -82,21 +147,19 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    const attendanceSession = session?.trim() || "Regular";
-
-    // Insert or update attendance
+    // Insert or update attendance.
     const operations = records.map((record) => ({
       updateOne: {
         filter: {
           subject: subject._id,
           student: record.studentId,
           date: attendanceDate,
-          session: attendanceSession,
+          session: attendanceSession.trim(),
         },
         update: {
           $set: {
             status: record.status,
-            remarks: record.remarks || "",
+            remarks: record.remarks?.trim() || "",
             markedBy: req.user._id,
           },
         },
@@ -136,6 +199,13 @@ const getMyAttendance = async (req, res) => {
     };
 
     if (req.query.subjectId) {
+      if (!mongoose.isValidObjectId(req.query.subjectId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid subject ID.",
+        });
+      }
+
       filter.subject = req.query.subjectId;
     }
 
@@ -153,7 +223,9 @@ const getMyAttendance = async (req, res) => {
     ).length;
 
     const percentage =
-      total > 0 ? Number(((present / total) * 100).toFixed(2)) : 0;
+      total > 0
+        ? Number(((present / total) * 100).toFixed(2))
+        : 0;
 
     return res.status(200).json({
       success: true,
@@ -178,10 +250,17 @@ const getMyAttendance = async (req, res) => {
 // GET SUBJECT ATTENDANCE — Faculty only
 const getSubjectAttendance = async (req, res) => {
   try {
-    if (req.user.role !== "faculty") {
+    if (req.user.role !== "faculty" || !req.user.isApproved) {
       return res.status(403).json({
         success: false,
-        message: "Only faculty members can view subject attendance.",
+        message: "Only approved faculty members can view attendance.",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(req.params.subjectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid subject ID.",
       });
     }
 
@@ -202,9 +281,9 @@ const getSubjectAttendance = async (req, res) => {
     };
 
     if (req.query.date) {
-      const selectedDate = new Date(`${req.query.date}T00:00:00.000Z`);
+      const selectedDate = parseAttendanceDate(req.query.date);
 
-      if (Number.isNaN(selectedDate.getTime())) {
+      if (!selectedDate) {
         return res.status(400).json({
           success: false,
           message: "Invalid date.",
