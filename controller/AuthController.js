@@ -298,13 +298,49 @@ const Login = async (req, res) => {
       });
     }
 
+    // Expire temporary admin access before creating a new session.
+    if (
+      user.adminAccess?.type === "temporary" &&
+      user.adminAccess.expiresAt &&
+      user.adminAccess.expiresAt <= new Date()
+    ) {
+      const updatedUser = await User.findOneAndUpdate(
+        {
+          _id: user._id,
+          "adminAccess.type": "temporary",
+          "adminAccess.expiresAt": { $lte: new Date() },
+        },
+        {
+          $set: {
+            adminAccess: {
+              type: null,
+              grantedBy: null,
+              expiresAt: null,
+              previousRole: null,
+            },
+          },
+          $inc: {
+            sessionVersion: 1,
+          },
+        },
+        { new: true }
+      );
+
+      if (updatedUser) {
+        user.adminAccess = updatedUser.adminAccess;
+        user.sessionVersion = updatedUser.sessionVersion;
+      }
+    }
+
+    // Only approved faculty can log in.
     if (
       user.role === "faculty" &&
       !user.isApproved
     ) {
       return res.status(403).json({
         success: false,
-        message: "Your faculty account is awaiting administrator approval.",
+        message:
+          "Your faculty account is awaiting administrator approval.",
       });
     }
 

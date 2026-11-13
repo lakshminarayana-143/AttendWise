@@ -7,6 +7,8 @@ const getEligibleUsers = async (req, res) => {
   try {
     const users = await User.find({
       role: { $in: ["student", "faculty"] },
+      adminAccess: { $exists: true },
+      "adminAccess.type": null,
       $or: [
         { role: "student" },
         { role: "faculty", isApproved: true },
@@ -51,7 +53,10 @@ const appointTemporaryAdmin = async (req, res) => {
 
     const expiryDate = new Date(expiresAt);
 
-    if (Number.isNaN(expiryDate.getTime()) || expiryDate <= new Date()) {
+    if (
+      Number.isNaN(expiryDate.getTime()) ||
+      expiryDate <= new Date()
+    ) {
       return res.status(400).json({
         success: false,
         message: "Expiry date must be valid and in the future.",
@@ -61,6 +66,7 @@ const appointTemporaryAdmin = async (req, res) => {
     const targetUser = await User.findOne({
       _id: userId,
       role: { $in: ["student", "faculty"] },
+      "adminAccess.type": null,
       $or: [
         { role: "student" },
         { role: "faculty", isApproved: true },
@@ -70,26 +76,28 @@ const appointTemporaryAdmin = async (req, res) => {
     if (!targetUser) {
       return res.status(404).json({
         success: false,
-        message: "Eligible student or approved faculty member not found.",
+        message:
+          "Eligible student or approved faculty member not found, or admin access already exists.",
       });
     }
 
-    const previousRole = targetUser.role;
+    const originalRole = targetUser.role;
 
+    // Preserve the original role and grant additional admin access.
     const updatedUser = await User.findOneAndUpdate(
       {
         _id: userId,
-        role: previousRole,
-        ...(previousRole === "faculty" ? { isApproved: true } : {}),
+        role: originalRole,
+        "adminAccess.type": null,
+        ...(originalRole === "faculty" ? { isApproved: true } : {}),
       },
       {
         $set: {
-          role: "admin",
           adminAccess: {
             type: "temporary",
             grantedBy: req.user._id,
             expiresAt: expiryDate,
-            previousRole,
+            previousRole: originalRole,
           },
         },
         $inc: {
@@ -105,13 +113,14 @@ const appointTemporaryAdmin = async (req, res) => {
     if (!updatedUser) {
       return res.status(409).json({
         success: false,
-        message: "This user is no longer eligible for temporary admin access.",
+        message:
+          "This user is no longer eligible for temporary admin access.",
       });
     }
 
     return res.status(201).json({
       success: true,
-      message: "Temporary admin appointed successfully.",
+      message: "Temporary admin access granted successfully.",
       admin: updatedUser,
     });
   } catch (error) {
@@ -128,7 +137,6 @@ const appointTemporaryAdmin = async (req, res) => {
 const getTemporaryAdmins = async (req, res) => {
   try {
     const admins = await User.find({
-      role: "admin",
       "adminAccess.type": "temporary",
     })
       .select("name email role adminAccess")
@@ -150,7 +158,7 @@ const getTemporaryAdmins = async (req, res) => {
   }
 };
 
-// Revoke temporary admin access and restore original role
+// Revoke temporary admin access without changing the original role
 const revokeTemporaryAdmin = async (req, res) => {
   try {
     const { id } = req.params;
@@ -158,39 +166,33 @@ const revokeTemporaryAdmin = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid admin ID.",
+        message: "Invalid user ID.",
       });
     }
 
     const admin = await User.findOneAndUpdate(
       {
         _id: id,
-        role: "admin",
         "adminAccess.type": "temporary",
-        "adminAccess.previousRole": {
-          $in: ["student", "faculty"],
-        },
       },
-      [
-        {
-          $set: {
-            role: "$adminAccess.previousRole",
-            adminAccess: {
-              type: null,
-              grantedBy: null,
-              expiresAt: null,
-              previousRole: null,
-            },
-            sessionVersion: {
-              $add: [{ $ifNull: ["$sessionVersion", 0] }, 1],
-            },
+      {
+        $set: {
+          adminAccess: {
+            type: null,
+            grantedBy: null,
+            expiresAt: null,
+            previousRole: null,
           },
         },
-      ],
+        $inc: {
+          sessionVersion: 1,
+        },
+      },
       {
         new: true,
+        runValidators: true,
       }
-    ).select("name email role sessionVersion");
+    ).select("name email role sessionVersion adminAccess");
 
     if (!admin) {
       return res.status(404).json({

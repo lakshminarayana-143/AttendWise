@@ -33,23 +33,13 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    // Check whether a temporary admin's access has expired
+    // Check temporary admin expiry without changing the original role
     if (
       user.adminAccess?.type === "temporary" &&
       user.adminAccess.expiresAt &&
       user.adminAccess.expiresAt <= new Date()
     ) {
-      const previousRole = user.adminAccess.previousRole;
-
-      if (!["student", "faculty"].includes(previousRole)) {
-        return res.status(403).json({
-          success: false,
-          message: "Temporary admin access has expired. Contact the owner.",
-        });
-      }
-
-      // Atomically restore the original role and invalidate old sessions
-      await User.findOneAndUpdate(
+      const updatedUser = await User.findOneAndUpdate(
         {
           _id: user._id,
           "adminAccess.type": "temporary",
@@ -58,7 +48,6 @@ const authMiddleware = async (req, res, next) => {
         [
           {
             $set: {
-              role: "$adminAccess.previousRole",
               adminAccess: {
                 type: null,
                 grantedBy: null,
@@ -70,12 +59,22 @@ const authMiddleware = async (req, res, next) => {
               },
             },
           },
-        ]
+        ],
+        { new: true }
       );
 
+      if (updatedUser) {
+        return res.status(401).json({
+          success: false,
+          message:
+            "Your temporary admin access has expired. Please log in again.",
+        });
+      }
+
+      // Another request may have already processed the expiry.
       return res.status(401).json({
         success: false,
-        message: "Your temporary admin access has expired. Please log in again.",
+        message: "Your session has expired. Please log in again.",
       });
     }
 
@@ -89,7 +88,9 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
+    // Attach the original role and additional admin permissions
     req.user = user;
+
     next();
   } catch (error) {
     console.error("Authentication middleware error:", error.message);
