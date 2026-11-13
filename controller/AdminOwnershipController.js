@@ -5,17 +5,17 @@ const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const AdminOwnership = require("../models/AdminOwnership");
 
-// Create the first and only OG Admin
+// Create the first and only OG Admin from an existing account
 const createFirstOwner = async (req, res) => {
   let session;
 
   try {
-    const { name, email, password, setupSecret } = req.body;
+    const { email, password, setupSecret } = req.body;
 
-    if (!name?.trim() || !email?.trim() || !password || !setupSecret) {
+    if (!email?.trim() || !password || !setupSecret) {
       return res.status(400).json({
         success: false,
-        message: "All admin details are required.",
+        message: "Email, password and setup secret are required.",
       });
     }
 
@@ -33,16 +33,11 @@ const createFirstOwner = async (req, res) => {
       });
     }
 
-    if (password.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must contain at least 8 characters.",
-      });
-    }
-
     const normalizedEmail = email.trim().toLowerCase();
 
     session = await mongoose.startSession();
+
+    let ownerDetails = null;
 
     await session.withTransaction(async () => {
       const existingOwnership = await AdminOwnership.findOne({
@@ -53,57 +48,85 @@ const createFirstOwner = async (req, res) => {
         throw new Error("OG Admin has already been established.");
       }
 
-      const existingUser = await User.findOne({
+      const user = await User.findOne({
         email: normalizedEmail,
-      }).session(session);
+      })
+        .select("+password")
+        .session(session);
 
-      if (existingUser) {
-        throw new Error("This email is already registered.");
+      if (!user) {
+        throw new Error("No account found with this email.");
       }
 
-      const hashedPassword = await bcrypt.hash(password, 12);
+      if (!["student", "faculty"].includes(user.role)) {
+        throw new Error("Only student or faculty accounts can become OG Admin.");
+      }
 
-      const [admin] = await User.create(
-        [
-          {
-            name: name.trim(),
-            email: normalizedEmail,
-            password: hashedPassword,
-            role: "admin",
-            isApproved: true,
-            adminAccess: {
-              type: "owner",
-              grantedBy: null,
-              expiresAt: null,
-              previousRole: null,
-            },
-          },
-        ],
-        { session }
+      if (!user.isApproved) {
+        throw new Error("Your account must be approved before becoming OG Admin.");
+      }
+
+      const passwordMatches = await bcrypt.compare(
+        password,
+        user.password
       );
+
+      if (!passwordMatches) {
+        throw new Error("Incorrect account password.");
+      }
+
+      const previousRole = user.role;
+
+      user.role = "admin";
+      user.isApproved = true;
+      user.adminAccess = {
+        type: "owner",
+        grantedBy: null,
+        expiresAt: null,
+        previousRole,
+      };
+
+      user.sessionVersion = (user.sessionVersion || 0) + 1;
+
+      await user.save({ session });
 
       await AdminOwnership.create(
         [
           {
             key: "ATTENDWISE_OWNER",
-            owner: admin._id,
+            owner: user._id,
+            pendingSuccessor: null,
+            transferInitiatedAt: null,
+            transferReason: "",
           },
         ],
         { session }
       );
+
+      ownerDetails = {
+        name: user.name,
+        email: user.email,
+        previousRole,
+      };
     });
 
     return res.status(201).json({
       success: true,
       message: "OG Admin created successfully.",
+      owner: ownerDetails,
     });
   } catch (error) {
     console.error("Create OG Admin error:", error);
 
-    if (
-      error.message === "OG Admin has already been established." ||
-      error.message === "This email is already registered."
-    ) {
+    const clientErrors = [
+      "OG Admin has already been established.",
+      "No account found with this email.",
+      "Only student or faculty accounts can become OG Admin.",
+      "Your account must be approved before becoming OG Admin.",
+      "Incorrect account password.",
+    ];
+
+    if (clientErrors.includes(error.message)) {
       return res.status(409).json({
         success: false,
         message: error.message,
@@ -113,7 +136,7 @@ const createFirstOwner = async (req, res) => {
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "An OG Admin or registered email already exists.",
+        message: "An OG Admin or ownership record already exists.",
       });
     }
 
@@ -133,7 +156,7 @@ const getOwner = async (req, res) => {
   try {
     const ownership = await AdminOwnership.findOne({
       key: "ATTENDWISE_OWNER",
-    }).populate("owner", "name role");
+    }).populate("owner", "name email role");
 
     if (!ownership || !ownership.owner) {
       return res.status(404).json({
